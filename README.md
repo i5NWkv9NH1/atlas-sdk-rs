@@ -29,23 +29,23 @@ This package is not published to crates.io. You can install it directly from Git
 
 ### Method 1: Install directly from GitHub
 ```bash
-cargo add --git https://github.com/i5NWkv9NH1/atlas-rs
+cargo add --git https://github.com/i5NWkv9NH1/atlas-mcp-rs
 ```
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
+atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-mcp-rs.git" }
 ```
 
 ### Method 2: Local path dependency (recommended for local development)
 ```bash
-git clone https://github.com/i5NWkv9NH1/atlas-rs.git
-cargo add --path /path/to/atlas-rs
+git clone https://github.com/i5NWkv9NH1/atlas-mcp-rs.git
+cargo add --path /path/to/atlas-mcp-rs
 ```
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-atlas-mcp = { path = "/path/to/atlas-rs" }
+atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
 ```
 
 ---

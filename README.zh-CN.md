@@ -29,23 +29,23 @@ macOS 视觉素材管理软件 [**Atlas**](https://atlasformac.com/) 的本地 M
 
 ### 方式一：直接从 GitHub 安装
 ```bash
-cargo add --git https://github.com/i5NWkv9NH1/atlas-rs
+cargo add --git https://github.com/i5NWkv9NH1/atlas-mcp-rs
 ```
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
+atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-mcp-rs.git" }
 ```
 
 ### 方式二：克隆到本地并通过本地路径引用（推荐本机多项目共用）
 ```bash
-git clone https://github.com/i5NWkv9NH1/atlas-rs.git
-cargo add --path /path/to/atlas-rs
+git clone https://github.com/i5NWkv9NH1/atlas-mcp-rs.git
+cargo add --path /path/to/atlas-mcp-rs
 ```
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-atlas-mcp = { path = "/path/to/atlas-rs" }
+atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
 ```
 
 ---

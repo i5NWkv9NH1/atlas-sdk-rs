@@ -806,11 +806,16 @@ async fn test_parameter_normalization() {
         Some("cat")
     );
 
-    // 2. create_smart_folder should normalize match to ""
+    // 2. create_smart_folder should normalize match to "" and rules unit to ""
     let _ = client
         .create_smart_folder(&CreateSmartFolderParams {
             name: "Test".to_string(),
-            rules: vec![],
+            rules: vec![SmartFolderRule {
+                field: SmartFolderRuleField::Name,
+                op: SmartFolderRuleOp::Contains,
+                text: Some("test".to_string()),
+                ..Default::default()
+            }],
             ..Default::default()
         })
         .await
@@ -822,6 +827,12 @@ async fn test_parameter_normalization() {
         .find(|(n, _)| n == "create_smart_folder")
         .expect("create_smart_folder call missing");
     assert_eq!(sf_call.1.get("match").and_then(|v| v.as_str()), Some(""));
+    let rules = sf_call
+        .1
+        .get("rules")
+        .and_then(|r| r.as_array())
+        .expect("rules array");
+    assert_eq!(rules[0].get("unit").and_then(|u| u.as_str()), Some(""));
 
     // 3. get_file should normalize size to 0
     let _ = client
@@ -1109,8 +1120,11 @@ async fn test_compound_ingestion_builder() {
     let mock = MockAtlasTransport::new();
     let imported_path = Arc::new(std::sync::Mutex::new(None::<String>));
     let imported_path_clone = imported_path.clone();
+    let captured_args = Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+    let captured_args_clone = captured_args.clone();
 
     mock.mock("import_files", move |args| {
+        *captured_args_clone.lock().unwrap() = Some(args.clone());
         if let Some(first) = args
             .get("paths")
             .and_then(|p| p.as_array())
@@ -1123,6 +1137,10 @@ async fn test_compound_ingestion_builder() {
             "ok": true,
             "item_ids": ["item-mock-ingest-rs-123"]
         }))
+    });
+
+    mock.mock("add_to_collection", |args| {
+        Ok(serde_json::json!({ "ok": true, "collection": args.get("collection") }))
     });
 
     mock.mock("add_tags", |args| {
@@ -1146,8 +1164,10 @@ async fn test_compound_ingestion_builder() {
     let result = client
         .ingest()
         .bytes(bytes, "png")
-        .filename("custom-name.png")
+        .filename("日/周_K线.png")
         .collection("Inbox")
+        .collection("Archive")
+        .canvas_position(120.0, 240.0)
         .tags(vec!["tag1".to_string(), "tag2".to_string()])
         .annotation("Sample note")
         .source_url("https://atlasformac.com")
@@ -1157,22 +1177,184 @@ async fn test_compound_ingestion_builder() {
         .expect("Ingestion should succeed");
 
     assert_eq!(result.item_id, "item-mock-ingest-rs-123");
+    assert_eq!(result.item_ids, vec!["item-mock-ingest-rs-123"]);
     assert!(result.imported);
+    assert!(!result.skipped_duplicate);
+
+    // Verify canvas coordinates and primary collection were forwarded
+    let import_call_args = captured_args.lock().unwrap().clone().unwrap();
+    assert_eq!(import_call_args.get("x"), Some(&serde_json::json!(120.0)));
+    assert_eq!(import_call_args.get("y"), Some(&serde_json::json!(240.0)));
+    assert_eq!(
+        import_call_args.get("collection"),
+        Some(&serde_json::json!("Inbox"))
+    );
 
     let history = mock.history();
     let tool_names: Vec<String> = history.iter().map(|(n, _)| n.clone()).collect();
     assert!(tool_names.contains(&"import_files".to_string()));
+    assert!(tool_names.contains(&"add_to_collection".to_string()));
     assert!(tool_names.contains(&"add_tags".to_string()));
     assert!(tool_names.contains(&"set_metadata".to_string()));
     assert!(tool_names.contains(&"set_liked".to_string()));
 
-    // Verify temp file was cleaned up
+    // Verify temp file was sanitized and cleaned up
     let captured_path = imported_path.lock().unwrap().clone();
     assert!(captured_path.is_some());
     let p = captured_path.unwrap();
     assert!(
+        p.contains("日_周_K线.png"),
+        "Path should have slashes sanitized"
+    );
+    assert!(
         !Path::new(&p).exists(),
         "Temporary file {p} should be cleaned up by RAII guard"
+    );
+}
+
+#[tokio::test]
+async fn test_compound_ingestion_multi_batch() {
+    let mock = MockAtlasTransport::new();
+    mock.mock("import_files", |_| {
+        Ok(serde_json::json!({
+            "ok": true,
+            "imported": 2,
+            "item_ids": ["batch-1", "batch-2"]
+        }))
+    });
+
+    let tag_ids = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let tag_ids_clone = tag_ids.clone();
+    mock.mock("add_tags", move |args| {
+        if let Some(ids) = args.get("item_ids").and_then(|i| i.as_array()) {
+            for id in ids {
+                if let Some(s) = id.as_str() {
+                    tag_ids_clone.lock().unwrap().push(s.to_string());
+                }
+            }
+        }
+        Ok(serde_json::json!({ "ok": true }))
+    });
+
+    let meta_ids = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let meta_ids_clone = meta_ids.clone();
+    mock.mock("set_metadata", move |args| {
+        if let Some(id) = args.get("item_id").and_then(|i| i.as_str()) {
+            meta_ids_clone.lock().unwrap().push(id.to_string());
+        }
+        Ok(serde_json::json!({ "ok": true }))
+    });
+
+    mock.mock("set_liked", |_| {
+        Ok(serde_json::json!({ "ok": true, "liked": true }))
+    });
+
+    let client = AtlasClient::with_transport(mock);
+    let res = client
+        .ingest()
+        .file_paths(vec!["/tmp/f1.png".to_string(), "/tmp/f2.png".to_string()])
+        .tags(vec!["tag-batch".to_string()])
+        .annotation("Batch annotation")
+        .liked(true)
+        .send()
+        .await
+        .expect("Batch ingestion should succeed");
+
+    assert_eq!(res.item_ids, vec!["batch-1", "batch-2"]);
+    assert_eq!(res.item_id, "batch-1");
+    assert_eq!(
+        *tag_ids.lock().unwrap(),
+        vec!["batch-1".to_string(), "batch-2".to_string()]
+    );
+    assert_eq!(
+        *meta_ids.lock().unwrap(),
+        vec!["batch-1".to_string(), "batch-2".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn test_compound_ingestion_url_safe_base64_and_mime() {
+    let mock = MockAtlasTransport::new();
+    let imported_file = Arc::new(std::sync::Mutex::new(None::<String>));
+    let imported_file_clone = imported_file.clone();
+
+    mock.mock("import_files", move |args| {
+        if let Some(first) = args
+            .get("paths")
+            .and_then(|p| p.as_array())
+            .and_then(|paths| paths.first())
+            .and_then(|f| f.as_str())
+        {
+            *imported_file_clone.lock().unwrap() = Some(first.to_string());
+        }
+        Ok(serde_json::json!({
+            "ok": true,
+            "item_ids": ["item-webp-rs"]
+        }))
+    });
+
+    let client = AtlasClient::with_transport(mock);
+
+    // Testing data:image/webp with URL-safe base64 character
+    let res = client
+        .ingest()
+        .base64(
+            "data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAQAcJaACdLoAAP7_2QAA",
+            "",
+        )
+        .send()
+        .await
+        .expect("Base64 webp should succeed");
+
+    assert_eq!(res.item_id, "item-webp-rs");
+    let file = imported_file.lock().unwrap().clone().unwrap();
+    assert!(file.ends_with(".webp"), "Detected extension should be webp");
+}
+
+#[tokio::test]
+async fn test_compound_ingestion_failure_and_unsupported_boundaries() {
+    let mock_fail = MockAtlasTransport::new();
+    mock_fail.mock("import_files", |_| {
+        Ok(serde_json::json!({
+            "ok": false,
+            "imported": 0,
+            "failed": [{ "path": "/tmp/bad.mp4", "reason": "AV1 decode failed" }]
+        }))
+    });
+
+    let client_fail = AtlasClient::with_transport(mock_fail);
+    let err = client_fail
+        .ingest()
+        .file_path("/tmp/bad.mp4")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("AV1 decode failed"),
+        "Error should contain failure reason"
+    );
+
+    let mock_unsupp = MockAtlasTransport::new();
+    mock_unsupp.mock("import_files", |_| {
+        Ok(serde_json::json!({
+            "ok": false,
+            "imported": 0,
+            "skipped_unsupported": 1
+        }))
+    });
+
+    let client_unsupp = AtlasClient::with_transport(mock_unsupp);
+    let err_unsupp = client_unsupp
+        .ingest()
+        .file_path("/tmp/bad.xyz")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        err_unsupp
+            .to_string()
+            .contains("File format is unsupported by Atlas"),
+        "Error should indicate unsupported format"
     );
 }
 

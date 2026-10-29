@@ -13,10 +13,16 @@ use std::path::PathBuf;
 /// Result returned by `IngestBuilder::send()`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IngestResult {
-    /// Unique item ID of the imported media in the Atlas library.
+    /// Unique item ID of the imported media (first item ID).
     pub item_id: String,
+    /// All unique item IDs of the imported media.
+    #[serde(default)]
+    pub item_ids: Vec<String>,
     /// Whether the import was reported successful.
     pub imported: bool,
+    /// Whether the item was skipped because it is an existing duplicate in the library.
+    #[serde(default)]
+    pub skipped_duplicate: bool,
     /// Target collections the item was assigned to.
     #[serde(default)]
     pub collections: Vec<String>,
@@ -29,6 +35,7 @@ enum IngestSource {
     Bytes { data: Vec<u8>, ext: String },
     Base64 { b64: String, ext: String },
     FilePath(String),
+    FilePaths(Vec<String>),
     Url(String),
 }
 
@@ -43,13 +50,16 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// Helper function to decode standard base64 strings without external dependencies.
+/// Helper function to decode standard and URL-safe base64 strings without external dependencies.
 fn decode_base64_str(s: &str) -> Vec<u8> {
     let mut table = [0u8; 256];
     const B64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     for (i, &c) in B64_CHARS.iter().enumerate() {
         table[c as usize] = i as u8;
     }
+    // Also support URL-safe base64: '-' maps to 62 (same as '+'), '_' maps to 63 (same as '/')
+    table[b'-' as usize] = 62;
+    table[b'_' as usize] = 63;
 
     let mut out = Vec::new();
     let bytes: Vec<u8> = s
@@ -106,7 +116,7 @@ pub struct IngestBuilder<'a, T: AtlasTransport> {
 }
 
 impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
-    /// Create a new IngestBuilder associated with an AtlasClient.
+    /// Create a new IngestBuilder instance.
     pub fn new(client: &'a AtlasClient<T>) -> Self {
         Self {
             client,
@@ -124,7 +134,7 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
         }
     }
 
-    /// Set in-memory binary bytes and file extension as the input source.
+    /// Set binary bytes as input source with file extension.
     pub fn bytes(mut self, data: impl Into<Vec<u8>>, ext: impl Into<String>) -> Self {
         self.source = Some(IngestSource::Bytes {
             data: data.into(),
@@ -133,100 +143,141 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
         self
     }
 
-    /// Set a base64 encoded string as the input source (automatically strips data URL headers).
+    /// Set base64 string as input source (automatically strips data URL headers and detects MIME).
     pub fn base64(mut self, b64: impl Into<String>, ext: impl Into<String>) -> Self {
         let raw = b64.into();
-        let clean = if let Some(idx) = raw.find(";base64,") {
-            raw[idx + 8..].trim().to_string()
+        let (clean_b64, detected_ext) = if raw.starts_with("data:") {
+            if let Some(idx) = raw.find(";base64,") {
+                let mime = raw[5..idx].to_lowercase();
+                let ext_from_mime = match mime.as_str() {
+                    "image/webp" => "webp",
+                    "image/gif" => "gif",
+                    "video/mp4" => "mp4",
+                    "video/quicktime" => "mov",
+                    "image/jpeg" | "image/jpg" => "jpg",
+                    "image/svg+xml" => "svg",
+                    "image/heic" | "image/heif" => "heic",
+                    "image/avif" => "avif",
+                    "image/png" => "png",
+                    _ => mime.split('/').nth(1).unwrap_or("png"),
+                };
+                let body = &raw[idx + 8..];
+                (body.trim().to_string(), Some(ext_from_mime.to_string()))
+            } else {
+                (raw.clone(), None)
+            }
         } else {
-            raw.trim().to_string()
+            (raw.trim().to_string(), None)
+        };
+
+        let ext_str = ext.into();
+        let final_ext = if !ext_str.is_empty() && ext_str != "png" {
+            ext_str
+        } else if let Some(m_ext) = detected_ext {
+            m_ext
+        } else if !ext_str.is_empty() {
+            ext_str
+        } else {
+            "png".to_string()
         };
 
         self.source = Some(IngestSource::Base64 {
-            b64: clean,
-            ext: ext.into(),
+            b64: clean_b64,
+            ext: final_ext,
         });
         self
     }
 
-    /// Set an existing local absolute file path as the input source.
+    /// Set an existing local absolute file path as input source.
     pub fn file_path(mut self, path: impl Into<String>) -> Self {
         self.source = Some(IngestSource::FilePath(path.into()));
         self
     }
 
-    /// Set a web media URL as the input source.
-    pub fn url(mut self, url: impl Into<String>) -> Self {
-        self.source = Some(IngestSource::Url(url.into()));
+    /// Set multiple existing local absolute file paths as input source for batch ingestion.
+    pub fn file_paths(mut self, paths: Vec<String>) -> Self {
+        self.source = Some(IngestSource::FilePaths(paths));
         self
     }
 
-    /// Specify a custom filename for the ingested item.
+    /// Set web media URL as input source.
+    pub fn url(mut self, media_url: impl Into<String>) -> Self {
+        self.source = Some(IngestSource::Url(media_url.into()));
+        self
+    }
+
+    /// Specify a custom filename for the ingested item (cleans slashes to prevent subpath errors).
     pub fn filename(mut self, name: impl Into<String>) -> Self {
-        self.custom_filename = Some(name.into());
+        let raw = name.into();
+        self.custom_filename = Some(raw.replace(['/', '\\'], "_"));
         self
     }
 
-    /// Assign the item to a target collection.
+    /// Assign item to a single collection.
     pub fn collection(mut self, col: impl Into<String>) -> Self {
-        let c = col.into();
-        if !self.target_collections.contains(&c) {
-            self.target_collections.push(c);
+        let name = col.into();
+        if !self.target_collections.contains(&name) {
+            self.target_collections.push(name);
         }
         self
     }
 
-    /// Assign the item to multiple target collections.
-    pub fn collections<I, S>(mut self, cols: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        for c in cols {
-            self = self.collection(c);
+    /// Assign item to multiple collections.
+    pub fn collections(mut self, cols: Vec<String>) -> Self {
+        for col in cols {
+            if !self.target_collections.contains(&col) {
+                self.target_collections.push(col);
+            }
         }
         self
     }
 
-    /// Assign tags to the item.
-    pub fn tags<I, S>(mut self, tags: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        for t in tags {
-            self.target_tags.push(t.into());
+    /// Attach a tag to the ingested item.
+    pub fn tag(mut self, t: impl Into<String>) -> Self {
+        let name = t.into();
+        if !self.target_tags.contains(&name) {
+            self.target_tags.push(name);
         }
         self
     }
 
-    /// Set item text annotation / notes.
+    /// Attach multiple tags to the ingested item.
+    pub fn tags(mut self, ts: Vec<String>) -> Self {
+        for t in ts {
+            if !self.target_tags.contains(&t) {
+                self.target_tags.push(t);
+            }
+        }
+        self
+    }
+
+    /// Set item text annotation / description.
     pub fn annotation(mut self, note: impl Into<String>) -> Self {
         self.meta_annotation = Some(note.into());
         self
     }
 
-    /// Set item author or creator.
-    pub fn author(mut self, author: impl Into<String>) -> Self {
-        self.meta_author = Some(author.into());
+    /// Set item author name.
+    pub fn author(mut self, name: impl Into<String>) -> Self {
+        self.meta_author = Some(name.into());
         self
     }
 
-    /// Set item source / origin URL.
+    /// Set item source URL.
     pub fn source_url(mut self, url: impl Into<String>) -> Self {
         self.meta_source_url = Some(url.into());
         self
     }
 
-    /// Set item geographical or physical location.
+    /// Set item location metadata.
     pub fn location(mut self, loc: impl Into<String>) -> Self {
         self.meta_location = Some(loc.into());
         self
     }
 
-    /// Set whether the item is marked as liked / favorite.
-    pub fn liked(mut self, liked: bool) -> Self {
-        self.is_liked = Some(liked);
+    /// Set item favorite / liked status.
+    pub fn liked(mut self, is_liked: bool) -> Self {
+        self.is_liked = Some(is_liked);
         self
     }
 
@@ -241,12 +292,12 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
     pub async fn send(&self) -> Result<IngestResult> {
         let source = self.source.as_ref().ok_or_else(|| AtlasError::ToolError {
             tool_name: "ingest".to_string(),
-            message: "No media source specified. Call .bytes(), .base64(), .file_path(), or .url() first."
+            message: "No media source specified. Call .bytes(), .base64(), .file_path(), .file_paths(), or .url() first."
                 .to_string(),
         })?;
 
         let mut temp_guard = TempDirGuard(None);
-        let mut resolved_path: Option<String> = None;
+        let mut paths_to_import: Vec<String> = Vec::new();
 
         // * 1. Prepare temporary disk file if in-memory bytes or base64 was provided
         match source {
@@ -278,7 +329,7 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
 
                 let file_path = temp_dir.join(file_name);
                 tokio::fs::write(&file_path, data).await?;
-                resolved_path = Some(file_path.to_string_lossy().to_string());
+                paths_to_import.push(file_path.to_string_lossy().to_string());
             }
             IngestSource::Base64 { b64, ext } => {
                 let clean_ext = ext.trim_start_matches('.');
@@ -309,32 +360,38 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
                 let file_path = temp_dir.join(file_name);
                 let decoded = decode_base64_str(b64);
                 tokio::fs::write(&file_path, decoded).await?;
-                resolved_path = Some(file_path.to_string_lossy().to_string());
+                paths_to_import.push(file_path.to_string_lossy().to_string());
             }
             IngestSource::FilePath(p) => {
-                resolved_path = Some(p.clone());
+                paths_to_import.push(p.clone());
+            }
+            IngestSource::FilePaths(ps) => {
+                paths_to_import.extend(ps.clone());
             }
             IngestSource::Url(_) => {}
         }
 
+        let first_col = self.target_collections.first().cloned();
+
         // * 2. Ingest file or download URL
-        let item_id: Option<String> = if let IngestSource::Url(url) = source {
+        let (all_item_ids, is_imported, is_duplicate) = if let IngestSource::Url(url) = source {
             let res = self
                 .client
                 .save_media_from_url(&SaveMediaFromUrlParams {
                     url: url.clone(),
-                    ..Default::default()
+                    collection: first_col,
                 })
                 .await?;
 
-            let mut id = res
-                .item_ids
-                .as_ref()
-                .and_then(|ids| ids.first().cloned())
-                .or(res.item_id);
+            let mut ids = Vec::new();
+            if let Some(res_ids) = res.item_ids {
+                ids.extend(res_ids);
+            } else if let Some(id) = res.item_id {
+                ids.push(id);
+            }
 
             // ? Fallback search by filename or URL if not directly returned
-            if id.is_none() {
+            if ids.is_empty() {
                 let search_res = self
                     .client
                     .search_items(&SearchItemsParams {
@@ -345,38 +402,68 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
                         ..Default::default()
                     })
                     .await?;
-                id = search_res.items.first().map(|i| i.id.clone());
+                if let Some(first_item) = search_res.items.first() {
+                    ids.push(first_item.id.clone());
+                }
             }
-            id
+            let imported = !ids.is_empty();
+            (ids, imported, false)
         } else {
-            let path_to_import = resolved_path
-                .as_ref()
-                .ok_or_else(|| AtlasError::ToolError {
+            if paths_to_import.is_empty() {
+                return Err(AtlasError::ToolError {
                     tool_name: "ingest".to_string(),
-                    message: "Resolved file path is unexpectedly missing".to_string(),
-                })?;
+                    message: "No file paths provided to import".to_string(),
+                });
+            }
 
-            let first_col = self.target_collections.first().cloned();
             let import_res = self
                 .client
                 .import_files(&ImportFilesParams {
-                    paths: vec![path_to_import.clone()],
+                    paths: paths_to_import.clone(),
                     collection: first_col,
-                    ..Default::default()
+                    x: self.canvas_x,
+                    y: self.canvas_y,
                 })
                 .await?;
 
-            let mut id = import_res
-                .item_ids
-                .as_ref()
-                .and_then(|ids| ids.first().cloned());
+            // ! 1. Check for failed array
+            if let Some(failed_list) = &import_res.failed {
+                if let Some(first_fail) = failed_list.first() {
+                    let path = first_fail
+                        .get("path")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("unknown");
+                    let reason = first_fail
+                        .get("reason")
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("unknown error");
+                    return Err(AtlasError::ToolError {
+                        tool_name: "import_files".to_string(),
+                        message: format!("Import failed for '{path}': {reason}"),
+                    });
+                }
+            }
 
-            // ? Fallback search by filename if duplicate skipped or not directly returned
-            if id.is_none() {
+            // ! 2. Check for unsupported format
+            if import_res.skipped_unsupported.unwrap_or(0) > 0 && import_res.imported == 0 {
+                return Err(AtlasError::ToolError {
+                    tool_name: "import_files".to_string(),
+                    message: "File format is unsupported by Atlas".to_string(),
+                });
+            }
+
+            let duplicate = import_res.skipped_duplicate.unwrap_or(0) > 0;
+            let mut ids = import_res.item_ids.unwrap_or_default();
+            let imported = import_res.imported > 0 || (!ids.is_empty() && !duplicate);
+
+            // ? 3. Fallback search by filename only if imported > 0 or skipped_duplicate > 0
+            if ids.is_empty() && (imported || duplicate) {
                 let query_term = self.custom_filename.clone().or_else(|| {
-                    PathBuf::from(path_to_import)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
+                    paths_to_import.first().and_then(|p| {
+                        PathBuf::from(p)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                    })
                 });
 
                 if let Some(term) = query_term {
@@ -384,85 +471,95 @@ impl<'a, T: AtlasTransport> IngestBuilder<'a, T> {
                         .client
                         .search_items(&SearchItemsParams {
                             query: Some(term),
-                            limit: Some(1),
+                            limit: Some(if paths_to_import.len() > 1 {
+                                paths_to_import.len() as i64
+                            } else {
+                                1
+                            }),
                             sort: Some(ItemSortField::DateAdded),
                             order: Some(SortOrder::Desc),
                             ..Default::default()
                         })
                         .await?;
-                    id = search_res.items.first().map(|i| i.id.clone());
+                    for item in search_res.items {
+                        ids.push(item.id);
+                    }
                 }
             }
-            id
+            (ids, imported, duplicate)
         };
 
         // ! Fatal: item ID could not be identified
-        let final_item_id = item_id.ok_or_else(|| AtlasError::ToolError {
-            tool_name: "ingest".to_string(),
-            message: "Failed to determine item_id from Atlas import response".to_string(),
-        })?;
+        if all_item_ids.is_empty() {
+            return Err(AtlasError::ToolError {
+                tool_name: "ingest".to_string(),
+                message: "Failed to determine item_id from Atlas import response".to_string(),
+            });
+        }
+
+        let primary_item_id = all_item_ids[0].clone();
 
         // * 3. Add to remaining collections
-        let is_url = matches!(source, IngestSource::Url(_));
-        let remaining_collections = if is_url {
-            &self.target_collections[..]
-        } else if self.target_collections.len() > 1 {
+        let additional_collections = if self.target_collections.len() > 1 {
             &self.target_collections[1..]
         } else {
             &[]
         };
 
-        for col in remaining_collections {
+        for col in additional_collections {
             self.client
                 .add_to_collection(&AddToCollectionParams {
                     collection: col.clone(),
-                    item_ids: vec![final_item_id.clone()],
-                    ..Default::default()
+                    item_ids: all_item_ids.clone(),
+                    r#move: None,
                 })
                 .await?;
         }
 
-        // * 4. Attach tags
+        // * 4. Attach tags to ALL items
         if !self.target_tags.is_empty() {
             self.client
                 .add_tags(&AddTagsParams {
-                    item_ids: vec![final_item_id.clone()],
+                    item_ids: all_item_ids.clone(),
                     tags: self.target_tags.clone(),
                 })
                 .await?;
         }
 
-        // * 5. Update metadata
+        // * 5. Update metadata for ALL items
         if self.meta_annotation.is_some()
             || self.meta_author.is_some()
             || self.meta_source_url.is_some()
             || self.meta_location.is_some()
         {
-            self.client
-                .set_metadata(&SetMetadataParams {
-                    item_id: final_item_id.clone(),
-                    annotation: self.meta_annotation.clone(),
-                    author: self.meta_author.clone(),
-                    source_url: self.meta_source_url.clone(),
-                    location: self.meta_location.clone(),
-                })
-                .await?;
+            for id in &all_item_ids {
+                self.client
+                    .set_metadata(&SetMetadataParams {
+                        item_id: id.clone(),
+                        annotation: self.meta_annotation.clone(),
+                        author: self.meta_author.clone(),
+                        source_url: self.meta_source_url.clone(),
+                        location: self.meta_location.clone(),
+                    })
+                    .await?;
+            }
         }
 
-        // * 6. Set liked state
+        // * 6. Set liked state for ALL items
         if let Some(liked) = self.is_liked {
             self.client
                 .set_liked(&SetLikedParams {
-                    item_ids: vec![final_item_id.clone()],
+                    item_ids: all_item_ids.clone(),
                     liked,
                 })
                 .await?;
         }
 
-        // Temp directory will be deleted when `temp_guard` drops at end of function
         Ok(IngestResult {
-            item_id: final_item_id,
-            imported: true,
+            item_id: primary_item_id,
+            item_ids: all_item_ids,
+            imported: is_imported,
+            skipped_duplicate: is_duplicate,
             collections: self.target_collections.clone(),
             tags: self.target_tags.clone(),
         })

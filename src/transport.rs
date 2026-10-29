@@ -82,6 +82,16 @@ pub fn normalize_params(tool: &str, value: serde_json::Value) -> serde_json::Val
         }
         "create_smart_folder" | "update_smart_folder" => {
             map.entry("match").or_insert_with(|| serde_json::json!(""));
+            if let Some(rules) = map.get_mut("rules").and_then(|r| r.as_array_mut()) {
+                for rule in rules {
+                    if let serde_json::Value::Object(r_map) = rule {
+                        r_map.entry("unit").or_insert_with(|| serde_json::json!(""));
+                        if r_map.get("unit") == Some(&serde_json::Value::Null) {
+                            r_map.insert("unit".to_string(), serde_json::json!(""));
+                        }
+                    }
+                }
+            }
         }
         "search_by_description" => {
             map.entry("kind").or_insert_with(|| serde_json::json!(""));

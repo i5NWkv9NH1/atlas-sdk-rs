@@ -1175,6 +1175,7 @@ pub struct EditLinkParams {
 #[serde(default)]
 pub struct EditLinkResult {
     pub ok: bool,
+    #[serde(alias = "id", default)]
     pub item_id: String,
     #[serde(flatten)]
     pub extra: serde_json::Value,

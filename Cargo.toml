@@ -1,5 +1,5 @@
 [package]
-name = "sora-atlas"
+name = "atlas-mcp"
 version = "0.1.0"
 edition = "2024"
 description = "Strongly-typed local MCP SDK for Atlas on macOS (Unofficial)"

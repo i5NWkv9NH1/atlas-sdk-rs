@@ -1,4 +1,4 @@
-# sora-atlas
+# atlas-mcp
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -13,6 +13,7 @@ Built for **Rust 2024 Edition** (Cargo 1.99.0+) with `tokio` and `reqwest`, feat
 ## Highlights
 
 - **100% Tool Coverage**: Complete, strongly-typed asynchronous implementations of all 78 tools from the official Atlas MCP schema.
+- **Fluent Compound Ingestion**: High-level `client.ingest()` builder to import binary bytes, base64 strings, file paths, or remote URLs with metadata and tags in one chained call.
 - **Idiomatic Rust API**: Uses native `snake_case` methods directly on `AtlasClient` (`client.search_items(&params).await`).
 - **Zero-Macro Object Safety**: Built without `async-trait` macros, leveraging standard `impl Future` and generic `AtlasClient<T: AtlasTransport = HttpAtlasTransport>`.
 - **Multi-Library Token Switching**: Automatically discovers `.mcp-token` from open libraries via `atlas status` and directory scans (`~/Pictures`, `~/Documents`), with support for per-library token routing.
@@ -33,7 +34,7 @@ cargo add --git https://github.com/i5NWkv9NH1/atlas-rs
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-sora-atlas = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
+atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
 ```
 
 ### Method 2: Local path dependency (recommended for local development)
@@ -44,7 +45,7 @@ cargo add --path /path/to/atlas-rs
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-sora-atlas = { path = "/path/to/atlas-rs" }
+atlas-mcp = { path = "/path/to/atlas-rs" }
 ```
 
 ---
@@ -54,7 +55,7 @@ sora-atlas = { path = "/path/to/atlas-rs" }
 ### 1. Basic Ingestion and Search
 
 ```rust
-use sora_atlas::*;
+use atlas_mcp::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -93,7 +94,7 @@ async fn main() -> Result<()> {
 Each `.atlaslibrary` bundle on macOS maintains its own authorization key in `<library_path>/.mcp-token`. You can register specific tokens or rely on automatic dynamic discovery:
 
 ```rust
-use sora_atlas::*;
+use atlas_mcp::*;
 use std::collections::HashMap;
 
 #[tokio::main]
@@ -123,6 +124,35 @@ async fn main() -> Result<()> {
         })
         .await?;
 
+    Ok(())
+}
+```
+
+### 3. One-Shot Media Ingestion (`client.ingest()`)
+
+Conveniently ingest images or media from raw bytes, base64 strings, file paths, or remote URLs while atomically assigning collections, tags, metadata, and favorite status in one call. Automatically cleans up temporary files via RAII guard.
+
+```rust
+use atlas_mcp::*;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client = AtlasClient::new();
+
+    // Ingest from base64 string
+    let result = client
+        .ingest()
+        .base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "png")
+        .filename("hero-banner.png")
+        .collection("Inspirations")
+        .tags(vec!["ui".to_string(), "banner".to_string()])
+        .annotation("Header illustration for redesign")
+        .source_url("https://example.com/banner.png")
+        .liked(true)
+        .send()
+        .await?;
+
+    println!("Ingested item ID: {}", result.item_id);
     Ok(())
 }
 ```

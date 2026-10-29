@@ -1,4 +1,4 @@
-//! # sora-atlas
+//! # atlas-mcp
 //!
 //! Strongly-typed local Model Context Protocol (MCP) SDK for the macOS **Atlas** visual library app (Unofficial).
 //!
@@ -6,6 +6,7 @@
 
 #![allow(clippy::collapsible_if)]
 
+pub mod ingest;
 pub mod media;
 pub mod models;
 pub mod organize;
@@ -15,6 +16,7 @@ pub mod ui;
 
 use std::sync::Arc;
 
+pub use ingest::{IngestBuilder, IngestResult};
 pub use models::*;
 pub use transport::{
     AtlasError, AtlasTransport, HttpAtlasTransport, HttpTransportOptions, MockAtlasTransport,
@@ -62,6 +64,11 @@ impl<T: AtlasTransport> AtlasClient<T> {
     /// Access the underlying transport implementation.
     pub fn transport(&self) -> &T {
         &self.transport
+    }
+
+    /// Create a fluent, chainable builder for one-shot compound media ingestion.
+    pub fn ingest(&self) -> IngestBuilder<'_, T> {
+        IngestBuilder::new(self)
     }
 
     /// Server health check ping.

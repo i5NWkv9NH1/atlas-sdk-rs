@@ -1,4 +1,4 @@
-# sora-atlas
+# atlas-mcp
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -13,6 +13,7 @@ macOS 视觉素材管理软件 [**Atlas**](https://atlasformac.com/) 的本地 M
 ## 核心特性
 
 - **100% 覆盖官方工具**：完整实现官方 MCP Schema 中的全部 78 个工具并提供强类型保护。
+- **高阶链式一步入库**：提供 `client.ingest()` 构建器，支持通过二进制字节流、Base64 字符串、文件路径或网络 URL 一步完成媒体写入、分类归集、打标与元数据配置。
 - **原生 Rust 风格 API**：统一使用 Rust 惯用的 `snake_case` 方法名，与协议工具名保持一致（如 `client.search_items(&params).await`）。
 - **零宏对象安全设计**：无 `async-trait` 过程宏开销，使用通用泛型结构 `AtlasClient<T: AtlasTransport = HttpAtlasTransport>`。
 - **多图库 Token 自动切换**：支持自动读取图库目录下的 `.mcp-token`、从 `atlas status` 探测当前图库路径、并支持按图库路径配置独立密钥。
@@ -33,7 +34,7 @@ cargo add --git https://github.com/i5NWkv9NH1/atlas-rs
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-sora-atlas = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
+atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
 ```
 
 ### 方式二：克隆到本地并通过本地路径引用（推荐本机多项目共用）
@@ -44,7 +45,7 @@ cargo add --path /path/to/atlas-rs
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-sora-atlas = { path = "/path/to/atlas-rs" }
+atlas-mcp = { path = "/path/to/atlas-rs" }
 ```
 
 ---
@@ -54,7 +55,7 @@ sora-atlas = { path = "/path/to/atlas-rs" }
 ### 1. 基础连接与检索
 
 ```rust
-use sora_atlas::*;
+use atlas_mcp::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -92,7 +93,7 @@ async fn main() -> Result<()> {
 每个 macOS 上的 `.atlaslibrary` 图库包在 `<图库路径>/.mcp-token` 都有自己独立的授权令牌。你可以在初始化时指定各个图库的 Token，也可以完全依赖自动发现：
 
 ```rust
-use sora_atlas::*;
+use atlas_mcp::*;
 use std::collections::HashMap;
 
 #[tokio::main]
@@ -122,6 +123,35 @@ async fn main() -> Result<()> {
         })
         .await?;
 
+    Ok(())
+}
+```
+
+### 3. 一步链式媒体入库（`client.ingest()`）
+
+通过链式调用一步完成图片或媒体的载入，支持二进制字节流、Base64 字符串、本地文件路径或网络媒体 URL，同时指定所属分类、标签、注释、来源与收藏状态，自动管理并通过 RAII 守卫清理临时文件：
+
+```rust
+use atlas_mcp::*;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client = AtlasClient::new();
+
+    // 通过 Base64 字符串一步入库
+    let result = client
+        .ingest()
+        .base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "png")
+        .filename("hero-banner.png")
+        .collection("灵感收集")
+        .tags(vec!["ui".to_string(), "banner".to_string()])
+        .annotation("改版首页横幅素材")
+        .source_url("https://example.com/banner.png")
+        .liked(true)
+        .send()
+        .await?;
+
+    println!("入库成功，素材 ID: {}", result.item_id);
     Ok(())
 }
 ```

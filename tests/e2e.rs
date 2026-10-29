@@ -1,7 +1,7 @@
 // * Atlas Rust SDK Live E2E Test Suite
 // * Strictly adheres to Section 5.2 safety redlines: non-destructive, isolated temporary test item only.
 
-use sora_atlas::*;
+use atlas_mcp::*;
 use std::path::Path;
 
 const TEST_IMAGE_PATH: &str = "/tmp/atlas-rs-e2e-test.png";
@@ -300,4 +300,175 @@ async fn test_live_isolated_ingestion_and_teardown() {
     }
 
     let _ = std::fs::remove_file(TEST_IMAGE_PATH);
+}
+
+// ============================================================================
+// 4. Compound Ingestion Pipeline Verification (client.ingest())
+// ============================================================================
+#[tokio::test]
+async fn test_live_compound_ingestion() {
+    let client = AtlasClient::new();
+    let ping_ok = client.ping().await.expect("Failed to ping server");
+    assert!(ping_ok);
+
+    let mut ingested_id: Option<String> = None;
+
+    let test_run = async {
+        let res = client
+            .ingest()
+            .base64(TINY_PNG_BASE64, "png")
+            .filename("ingest-e2e.png")
+            .tags(vec!["ingest-tag".to_string()])
+            .annotation("ingest-note")
+            .source_url("https://example.com")
+            .send()
+            .await
+            .expect("Compound ingestion failed");
+
+        assert!(res.imported);
+        assert!(!res.item_id.is_empty());
+        ingested_id = Some(res.item_id.clone());
+
+        let detail = client
+            .get_item(&GetItemParams {
+                item_id: res.item_id.clone(),
+            })
+            .await
+            .expect("Failed to get ingested item");
+
+        assert_eq!(detail.id, res.item_id);
+        let tags = detail.tags.unwrap_or_default();
+        assert!(tags.contains(&"ingest-tag".to_string()));
+        assert_eq!(detail.annotation.as_deref(), Some("ingest-note"));
+        assert_eq!(detail.source_url.as_deref(), Some("https://example.com"));
+    };
+
+    test_run.await;
+
+    if let Some(ref id) = ingested_id {
+        let trash_res = client
+            .trash_items(&TrashItemsParams {
+                item_ids: vec![id.clone()],
+            })
+            .await;
+        if let Ok(res) = trash_res {
+            assert!(res.ok);
+        }
+    }
+}
+
+// ============================================================================
+// 5. Color Lifecycle Verification (add_color -> edit_color -> trash_items)
+// ============================================================================
+#[tokio::test]
+async fn test_live_color_lifecycle() {
+    let client = AtlasClient::new();
+    let ping_ok = client.ping().await.expect("Failed to ping server");
+    assert!(ping_ok);
+
+    let mut color_id: Option<String> = None;
+
+    let test_run = async {
+        let add_res = client
+            .add_color(&AddColorParams {
+                hex: "#FF5722".to_string(),
+                ..Default::default()
+            })
+            .await
+            .expect("Failed to add color");
+        assert!(add_res.ok);
+        assert!(!add_res.item_id.is_empty());
+        let cid = add_res.item_id.clone();
+        color_id = Some(cid.clone());
+
+        let edit_res = client
+            .edit_color(&EditColorParams {
+                item_id: cid.clone(),
+                hex: "#00E5FF".to_string(),
+            })
+            .await
+            .expect("Failed to edit color");
+        assert!(edit_res.ok);
+
+        let detail = client
+            .get_item(&GetItemParams {
+                item_id: cid.clone(),
+            })
+            .await
+            .expect("Failed to get color item detail");
+        assert_eq!(detail.id, cid);
+        assert_eq!(detail.hex.as_deref(), Some("#00E5FF"));
+    };
+
+    test_run.await;
+
+    if let Some(ref id) = color_id {
+        let trash_res = client
+            .trash_items(&TrashItemsParams {
+                item_ids: vec![id.clone()],
+            })
+            .await;
+        if let Ok(res) = trash_res {
+            assert!(res.ok);
+        }
+    }
+}
+
+// ============================================================================
+// 6. Link Lifecycle Verification (add_link -> edit_link -> trash_items)
+// ============================================================================
+#[tokio::test]
+async fn test_live_link_lifecycle() {
+    let client = AtlasClient::new();
+    let ping_ok = client.ping().await.expect("Failed to ping server");
+    assert!(ping_ok);
+
+    let mut link_id: Option<String> = None;
+
+    let test_run = async {
+        let add_res = client
+            .add_link(&AddLinkParams {
+                url: "https://atlasformac.com".to_string(),
+                ..Default::default()
+            })
+            .await
+            .expect("Failed to add link");
+        assert!(add_res.ok);
+        assert!(!add_res.item_id.is_empty());
+        let lid = add_res.item_id.clone();
+        link_id = Some(lid.clone());
+
+        let edit_res = client
+            .edit_link(&EditLinkParams {
+                item_id: lid.clone(),
+                title: Some("Atlas Official Site Updated".to_string()),
+                ..Default::default()
+            })
+            .await
+            .expect("Failed to edit link");
+        assert_eq!(edit_res.item_id, lid);
+
+        let detail = client
+            .get_item(&GetItemParams {
+                item_id: lid.clone(),
+            })
+            .await
+            .expect("Failed to get link item detail");
+        assert_eq!(detail.id, lid);
+        let title_or_name = detail.title.or(Some(detail.name)).unwrap_or_default();
+        assert!(title_or_name.contains("Atlas"));
+    };
+
+    test_run.await;
+
+    if let Some(ref id) = link_id {
+        let trash_res = client
+            .trash_items(&TrashItemsParams {
+                item_ids: vec![id.clone()],
+            })
+            .await;
+        if let Ok(res) = trash_res {
+            assert!(res.ok);
+        }
+    }
 }

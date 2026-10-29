@@ -1,8 +1,8 @@
 // * Atlas Rust SDK Unit Test Suite
 // * Validates 100% Schema Parity, Mock Tool Invocations, Argument Normalization, 401 Retry, view_items Unpacking, and Secret Leak Prevention.
 
+use atlas_mcp::*;
 use serde_json::Value;
-use sora_atlas::*;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -1102,7 +1102,82 @@ async fn test_multi_library_token_switching() {
 }
 
 // ============================================================================
-// 8. Secret Leak Prevention Scan
+// 8. Compound Ingestion Builder (client.ingest())
+// ============================================================================
+#[tokio::test]
+async fn test_compound_ingestion_builder() {
+    let mock = MockAtlasTransport::new();
+    let imported_path = Arc::new(std::sync::Mutex::new(None::<String>));
+    let imported_path_clone = imported_path.clone();
+
+    mock.mock("import_files", move |args| {
+        if let Some(first) = args
+            .get("paths")
+            .and_then(|p| p.as_array())
+            .and_then(|paths| paths.first())
+            .and_then(|f| f.as_str())
+        {
+            *imported_path_clone.lock().unwrap() = Some(first.to_string());
+        }
+        Ok(serde_json::json!({
+            "ok": true,
+            "item_ids": ["item-mock-ingest-rs-123"]
+        }))
+    });
+
+    mock.mock("add_tags", |args| {
+        let count = args
+            .get("tags")
+            .and_then(|t| t.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        Ok(serde_json::json!({ "ok": true, "added": count }))
+    });
+
+    mock.mock("set_metadata", |_| Ok(serde_json::json!({ "ok": true })));
+
+    mock.mock("set_liked", |_| {
+        Ok(serde_json::json!({ "ok": true, "liked": true }))
+    });
+
+    let client = AtlasClient::with_transport(mock.clone());
+    let bytes = vec![1, 2, 3, 4];
+
+    let result = client
+        .ingest()
+        .bytes(bytes, "png")
+        .filename("custom-name.png")
+        .collection("Inbox")
+        .tags(vec!["tag1".to_string(), "tag2".to_string()])
+        .annotation("Sample note")
+        .source_url("https://atlasformac.com")
+        .liked(true)
+        .send()
+        .await
+        .expect("Ingestion should succeed");
+
+    assert_eq!(result.item_id, "item-mock-ingest-rs-123");
+    assert!(result.imported);
+
+    let history = mock.history();
+    let tool_names: Vec<String> = history.iter().map(|(n, _)| n.clone()).collect();
+    assert!(tool_names.contains(&"import_files".to_string()));
+    assert!(tool_names.contains(&"add_tags".to_string()));
+    assert!(tool_names.contains(&"set_metadata".to_string()));
+    assert!(tool_names.contains(&"set_liked".to_string()));
+
+    // Verify temp file was cleaned up
+    let captured_path = imported_path.lock().unwrap().clone();
+    assert!(captured_path.is_some());
+    let p = captured_path.unwrap();
+    assert!(
+        !Path::new(&p).exists(),
+        "Temporary file {p} should be cleaned up by RAII guard"
+    );
+}
+
+// ============================================================================
+// 9. Secret Leak Prevention Scan
 // ============================================================================
 #[tokio::test]
 async fn test_secret_leak_prevention() {

@@ -1,4 +1,4 @@
-# atlas-mcp
+# atlas-sdk
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -29,23 +29,23 @@ This package is not published to crates.io. You can install it directly from Git
 
 ### Method 1: Install directly from GitHub
 ```bash
-cargo add --git https://github.com/i5NWkv9NH1/atlas-mcp-rs
+cargo add --git https://github.com/i5NWkv9NH1/atlas-sdk-rs
 ```
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-mcp-rs.git" }
+atlas-sdk = { git = "https://github.com/i5NWkv9NH1/atlas-sdk-rs.git" }
 ```
 
 ### Method 2: Local path dependency (recommended for local development)
 ```bash
-git clone https://github.com/i5NWkv9NH1/atlas-mcp-rs.git
-cargo add --path /path/to/atlas-mcp-rs
+git clone https://github.com/i5NWkv9NH1/atlas-sdk-rs.git
+cargo add --path /path/to/atlas-sdk-rs
 ```
 Or configure in your `Cargo.toml`:
 ```toml
 [dependencies]
-atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
+atlas-sdk = { path = "/path/to/atlas-sdk-rs" }
 ```
 
 ---
@@ -55,7 +55,7 @@ atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
 ### 1. Basic Ingestion and Search
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 Each `.atlaslibrary` bundle on macOS maintains its own authorization key in `<library_path>/.mcp-token`. You can register specific tokens or rely on automatic dynamic discovery:
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 use std::collections::HashMap;
 
 #[tokio::main]
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
 Conveniently ingest images or media from raw bytes, base64 strings, file paths, or remote URLs while atomically assigning collections, tags, metadata, and favorite status in one call. Automatically cleans up temporary files via RAII guard.
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {

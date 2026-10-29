@@ -1,7 +1,7 @@
 // * Atlas Rust SDK Live E2E Test Suite
 // * Strictly adheres to Section 5.2 safety redlines: non-destructive, isolated temporary test item only.
 
-use atlas_mcp::*;
+use atlas_sdk::*;
 use std::path::Path;
 
 const TEST_IMAGE_PATH: &str = "/tmp/atlas-rs-e2e-test.png";

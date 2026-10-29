@@ -1,4 +1,4 @@
-# atlas-mcp
+# atlas-sdk
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -29,23 +29,23 @@ macOS 视觉素材管理软件 [**Atlas**](https://atlasformac.com/) 的本地 M
 
 ### 方式一：直接从 GitHub 安装
 ```bash
-cargo add --git https://github.com/i5NWkv9NH1/atlas-mcp-rs
+cargo add --git https://github.com/i5NWkv9NH1/atlas-sdk-rs
 ```
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-atlas-mcp = { git = "https://github.com/i5NWkv9NH1/atlas-mcp-rs.git" }
+atlas-sdk = { git = "https://github.com/i5NWkv9NH1/atlas-sdk-rs.git" }
 ```
 
 ### 方式二：克隆到本地并通过本地路径引用（推荐本机多项目共用）
 ```bash
-git clone https://github.com/i5NWkv9NH1/atlas-mcp-rs.git
-cargo add --path /path/to/atlas-mcp-rs
+git clone https://github.com/i5NWkv9NH1/atlas-sdk-rs.git
+cargo add --path /path/to/atlas-sdk-rs
 ```
 或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
+atlas-sdk = { path = "/path/to/atlas-sdk-rs" }
 ```
 
 ---
@@ -55,7 +55,7 @@ atlas-mcp = { path = "/path/to/atlas-mcp-rs" }
 ### 1. 基础连接与检索
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
 每个 macOS 上的 `.atlaslibrary` 图库包在 `<图库路径>/.mcp-token` 都有自己独立的授权令牌。你可以在初始化时指定各个图库的 Token，也可以完全依赖自动发现：
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 use std::collections::HashMap;
 
 #[tokio::main]
@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
 通过链式调用一步完成图片或媒体的载入，支持二进制字节流、Base64 字符串、本地文件路径或网络媒体 URL，同时指定所属分类、标签、注释、来源与收藏状态，自动管理并通过 RAII 守卫清理临时文件：
 
 ```rust
-use atlas_mcp::*;
+use atlas_sdk::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {

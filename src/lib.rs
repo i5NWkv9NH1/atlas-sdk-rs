@@ -1,4 +1,4 @@
-//! # atlas-mcp
+//! # atlas-sdk
 //!
 //! Strongly-typed local Model Context Protocol (MCP) SDK for the macOS **Atlas** visual library app (Unofficial).
 //!

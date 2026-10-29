@@ -1,7 +1,7 @@
 // * Atlas Rust SDK Unit Test Suite
 // * Validates 100% Schema Parity, Mock Tool Invocations, Argument Normalization, 401 Retry, view_items Unpacking, and Secret Leak Prevention.
 
-use atlas_mcp::*;
+use atlas_sdk::*;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};

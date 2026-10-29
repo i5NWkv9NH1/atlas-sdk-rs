@@ -1,10 +1,10 @@
 [package]
-name = "atlas-mcp"
+name = "atlas-sdk"
 version = "1.2.0"
 edition = "2024"
 description = "Strongly-typed local MCP SDK for Atlas on macOS (Unofficial)"
 license = "MIT"
-repository = "https://github.com/i5NWkv9NH1/atlas-mcp-rs"
+repository = "https://github.com/i5NWkv9NH1/atlas-sdk-rs"
 exclude = ["tests/*"]
 
 [dependencies]

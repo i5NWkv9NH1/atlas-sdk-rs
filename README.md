@@ -1,0 +1,200 @@
+# sora-atlas
+
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+Official strongly-typed local Model Context Protocol (MCP) SDK for the macOS **Atlas** visual library application.
+
+Built for **Rust 2024 Edition** (Cargo 1.99.0+) with `tokio` and `reqwest`, featuring zero async-trait macros and zero runtime overhead.
+
+---
+
+## Highlights
+
+- **100% Tool Coverage**: Complete, strongly-typed asynchronous implementations of all 78 tools from the official Atlas MCP schema.
+- **Idiomatic Rust API**: Uses native `snake_case` methods directly on `AtlasClient` (`client.search_items(&params).await`).
+- **Zero-Macro Object Safety**: Built without `async-trait` macros, leveraging standard `impl Future` and generic `AtlasClient<T: AtlasTransport = HttpAtlasTransport>`.
+- **Multi-Library Token Switching**: Automatically discovers `.mcp-token` from open libraries via `atlas status` and directory scans (`~/Pictures`, `~/Documents`), with support for per-library token routing.
+- **Fault-Tolerant Transport**: Transparent single retry on `HTTP 401 Unauthorized` and silent macOS background application launch (`open -g -a Atlas`) on connection refusal.
+- **Parameter Normalization**: Transparently cleans and normalizes MCP protocol arguments (supplying `""` for unset enum filters and `0` for numeric filters).
+- **Offline Mock Transport**: Built-in thread-safe `MockAtlasTransport` with argument recording for deterministic unit testing.
+
+---
+
+## Installation
+
+Add `sora-atlas` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+sora-atlas = "0.1.0"
+tokio = { version = "1.43", features = ["rt", "macros"] }
+```
+
+---
+
+## Quick Start
+
+### 1. Basic Ingestion and Search
+
+```rust
+use sora_atlas::*;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Connects to local Atlas MCP server (defaults to http://127.0.0.1:50473/mcp)
+    // Automatically discovers active Bearer token
+    let client = AtlasClient::new();
+
+    // Check server health
+    let is_live = client.ping().await?;
+    println!("Atlas MCP Server reachable: {is_live}");
+
+    // Inspect active library
+    let info = client.library_info(&LibraryInfoParams::default()).await?;
+    println!("Library: {} ({} unique items)", info.name, info.unique_items);
+
+    // Search items with metadata filters
+    let search_res = client
+        .search_items(&SearchItemsParams {
+            query: Some("design system".to_string()),
+            kind: Some(ItemKind::Image),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await?;
+
+    for item in search_res.items {
+        println!("Found item [{}]: {}", item.id, item.name);
+    }
+
+    Ok(())
+}
+```
+
+### 2. Multi-Library Token Configuration
+
+Each `.atlaslibrary` bundle on macOS maintains its own authorization key in `<library_path>/.mcp-token`. You can register specific tokens or rely on automatic dynamic discovery:
+
+```rust
+use sora_atlas::*;
+use std::collections::HashMap;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let mut library_tokens = HashMap::new();
+    library_tokens.insert(
+        "/Users/username/Pictures/Work.atlaslibrary".to_string(),
+        "token_for_work".to_string(),
+    );
+    library_tokens.insert(
+        "/Users/username/Pictures/Personal.atlaslibrary".to_string(),
+        "token_for_personal".to_string(),
+    );
+
+    let client = AtlasClient::with_options(HttpTransportOptions {
+        token: std::env::var("ATLAS_MCP_TOKEN").ok(),
+        library_tokens,
+        auto_discover_token: true,
+        auto_launch: true,
+        ..Default::default()
+    });
+
+    // Switch active library
+    client
+        .switch_library(&SwitchLibraryParams {
+            path: "/Users/username/Pictures/Work.atlaslibrary".to_string(),
+        })
+        .await?;
+
+    Ok(())
+}
+```
+
+---
+
+## Domain Modules & Available Methods
+
+`AtlasClient` provides strongly-typed methods for all 78 tools across four primary domains:
+
+### Query Domain (`src/query.rs`)
+
+- `search_items(&SearchItemsParams)`
+- `search_by_description(&SearchByDescriptionParams)`
+- `find_similar(&FindSimilarParams)`
+- `get_item(&GetItemParams)`
+- `view_items(&ViewItemsParams)`
+- `get_file(&GetFileParams)`
+- `store_embeddings(&StoreEmbeddingsParams)`
+- `query_embeddings(&QueryEmbeddingsParams)`
+- `run_smart_folder(&RunSmartFolderParams)`
+- `get_board(&GetBoardParams)`
+- `get_current_view(&GetCurrentViewParams)`
+
+### Media Domain (`src/media.rs`)
+
+- `import_files(&ImportFilesParams)`
+- `add_link(&AddLinkParams)`
+- `edit_link(&EditLinkParams)`
+- `add_color(&AddColorParams)`
+- `edit_color(&EditColorParams)`
+- `save_media_from_url(&SaveMediaFromUrlParams)`
+- `edit_image(&EditImageParams)`
+- `refresh_thumbnail(&RefreshThumbnailParams)`
+- `set_liked(&SetLikedParams)`
+- `set_metadata(&SetMetadataParams)`
+- `trash_items(&TrashItemsParams)`
+- `restore_items(&RestoreItemsParams)`
+- `delete_permanently(&DeletePermanentlyParams)`
+- `empty_trash(&EmptyTrashParams)`
+
+### Organize Domain (`src/organize.rs`)
+
+- **Collections**: `list_collections()`, `create_collection(&CreateCollectionParams)`, `rename_collection(&RenameCollectionParams)`, `archive_collection(&ArchiveCollectionParams)`, `delete_collection(&DeleteCollectionParams)`, `set_collection_order(&SetCollectionOrderParams)`, `add_to_collection(&AddToCollectionParams)`, `remove_from_collection(&RemoveFromCollectionParams)`
+- **Folders**: `list_collection_folders()`, `create_collection_folder(&CreateCollectionFolderParams)`, `move_collection_folder(&MoveCollectionFolderParams)`, `rename_collection_folder(&RenameCollectionFolderParams)`, `delete_collection_folder(&DeleteCollectionFolderParams)`, `move_collection_to_folder(&MoveCollectionToFolderParams)`
+- **Tags & Tag Folders**: `list_tags()`, `create_tag(&CreateTagParams)`, `rename_tag(&RenameTagParams)`, `delete_tag(&DeleteTagParams)`, `add_tags(&AddTagsParams)`, `remove_tags(&RemoveTagsParams)`, `set_tags(&SetTagsParams)`, `move_tags_to_folder(&MoveTagsToFolderParams)`, `create_tag_folder(&CreateTagFolderParams)`, `rename_tag_folder(&RenameTagFolderParams)`, `delete_tag_folder(&DeleteTagFolderParams)`
+- **Smart Folders**: `list_smart_folders()`, `create_smart_folder(&CreateSmartFolderParams)`, `update_smart_folder(&UpdateSmartFolderParams)`, `delete_smart_folder(&DeleteSmartFolderParams)`
+- **Canvas Board**: `arrange_board(&ArrangeBoardParams)`, `move_to_group(&MoveToGroupParams)`, `move_group(&MoveGroupParams)`, `reset_board_layout(&ResetBoardLayoutParams)`, `undo_board_layout(&UndoBoardLayoutParams)`
+- **Connected Folders**: `list_connected_folders()`, `connect_folder(&ConnectFolderParams)`, `disconnect_folder(&DisconnectFolderParams)`, `rescan_folder(&RescanFolderParams)`
+- **Libraries**: `library_info(&LibraryInfoParams)`, `list_libraries()`, `create_library(&CreateLibraryParams)`, `switch_library(&SwitchLibraryParams)`
+
+### UI Domain (`src/ui.rs`)
+
+- `show_in_app(&ShowInAppParams)`
+- `show_items(&ShowItemsParams)`
+- `open_item(&OpenItemParams)`
+- `select_items(&SelectItemsParams)`
+- `set_view_mode(&SetViewModeParams)`
+- `show_in_finder(&ShowInFinderParams)`
+- `get_settings(&GetSettingsParams)`
+- `set_setting(&SetSettingParams)`
+- `open_settings(&OpenSettingsParams)`
+- `app_info()`
+- `run_maintenance(&RunMaintenanceParams)`
+
+---
+
+## Unit & E2E Testing
+
+### Offline Unit Testing
+
+Run the full unit test suite without starting the Atlas desktop application:
+
+```bash
+cargo test --test unit
+```
+
+### Live End-to-End Testing
+
+Make sure the Atlas application is running on your Mac (`http://127.0.0.1:50473/mcp`), then run:
+
+```bash
+cargo test --test e2e
+```
+
+The E2E test strictly follows safety redlines: it uses a temporary 1x1 test image (`/tmp/atlas-rs-e2e-test.png`), performs verification, moves the test item to the Trash, and deletes the temporary file during teardown.
+
+---
+
+## License
+
+MIT

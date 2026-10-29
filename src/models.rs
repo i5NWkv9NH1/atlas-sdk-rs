@@ -499,10 +499,16 @@ pub struct AtlasConnectedFolder {
 
 /// Board spatial group.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AtlasBoardGroup {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default)]
+    pub x: f64,
+    #[serde(default)]
+    pub y: f64,
+    #[serde(default)]
     pub items: Vec<AtlasItemSummary>,
 }
 
@@ -526,8 +532,10 @@ pub struct SemanticSearchResultItem {
 
 /// Application setting item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AtlasSettingItem {
-    pub key: String,
+    #[serde(alias = "key", default)]
+    pub name: String,
     #[serde(rename = "type")]
     pub r#type: String,
     pub value: serde_json::Value,

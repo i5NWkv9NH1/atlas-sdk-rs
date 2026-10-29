@@ -80,9 +80,43 @@ async fn test_live_schema_parity_and_skill_resource() {
         "Live Atlas server must report all 78 tools"
     );
 
-    for tool in &tools_res.tools {
-        assert!(!tool.name.is_empty(), "Tool name must not be empty");
-    }
+    let live_tool_names: std::collections::BTreeSet<String> =
+        tools_res.tools.iter().map(|t| t.name.clone()).collect();
+
+    // Verify 100% equality against the 78 tools in tests/fixtures/atlas-schema.json
+    let fixture_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/atlas-schema.json"
+    );
+    let fixture_content =
+        std::fs::read_to_string(fixture_path).expect("tests/fixtures/atlas-schema.json must exist");
+    let fixture_json: serde_json::Value =
+        serde_json::from_str(&fixture_content).expect("Invalid JSON in schema fixture");
+    let fixture_tools = fixture_json
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .or_else(|| fixture_json.get("tools"))
+        .and_then(|t| t.as_array())
+        .expect("Failed to find tools array in schema fixture");
+
+    let expected_tool_names: std::collections::BTreeSet<String> = fixture_tools
+        .iter()
+        .filter_map(|t| {
+            t.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+
+    assert_eq!(
+        expected_tool_names.len(),
+        78,
+        "Schema fixture must contain exactly 78 tools"
+    );
+    assert_eq!(
+        live_tool_names, expected_tool_names,
+        "Live Atlas tool set must be 100% identical to the schema fixture"
+    );
 
     // 2. Read official skill document resource
     let skill_res = client

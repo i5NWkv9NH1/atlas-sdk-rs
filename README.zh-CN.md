@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+> **说明**：本 SDK 主要为个人自用封装。仓库中的绝大部分代码、工程规范与测试套件均由 **Gemini 3.8 Flash** 与 **Gemini 4 Argon** 生成。
+
 macOS 视觉素材管理软件 **Atlas** 的本地 MCP 客户端强类型 Rust SDK。
 
 专为 **Rust 2024 Edition**（Cargo 1.99.0+）打造，基于 `tokio` 与 `reqwest` 实现，零 async-trait 宏引入，零运行时额外开销。
@@ -168,7 +170,13 @@ async fn main() -> Result<()> {
 - `set_setting(&SetSettingParams)`：修改系统设置项
 - `open_settings(&OpenSettingsParams)`：打开设置窗口
 - `app_info()`：获取软件版本与系统环境信息
-- `run_maintenance(&RunMaintenanceParams)`：运行图库去重或缩略图修复维护任务
+- `runMaintenance(&RunMaintenanceParams)`：运行图库去重或缩略图修复维护任务
+
+### MCP 原生协议方法
+
+- `list_tools()`：请求当前服务端实时注册的全部工具及其入参 JSON Schema。
+- `list_resources()`：获取可用的 MCP 资源列表（如 `atlas://skill` 等）。
+- `read_resource(uri)`：按 URI 读取指定 MCP 资源的具体内容（文档文本或素材数据）。
 
 ---
 

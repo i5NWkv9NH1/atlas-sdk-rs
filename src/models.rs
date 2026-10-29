@@ -2381,3 +2381,123 @@ pub struct RunMaintenanceResult {
     #[serde(flatten)]
     pub extra: serde_json::Value,
 }
+
+// ============================================================================
+// MCP Native Protocol Types (tools/list, resources/list, resources/read)
+// ============================================================================
+
+/// Definition of an individual MCP tool returned by `tools/list`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct McpToolDefinition {
+    /// Name of the tool.
+    pub name: String,
+    /// Human-readable description of the tool.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    /// JSON Schema describing input parameters.
+    #[serde(
+        rename = "inputSchema",
+        alias = "input_schema",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub input_schema: Option<serde_json::Value>,
+    /// Additional dynamic fields.
+    #[serde(flatten, default)]
+    pub extra: serde_json::Value,
+}
+
+/// Response payload of `tools/list` JSON-RPC method.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct McpListToolsResult {
+    /// List of available tools.
+    pub tools: Vec<McpToolDefinition>,
+    /// Optional pagination cursor.
+    #[serde(
+        rename = "nextCursor",
+        alias = "next_cursor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub next_cursor: Option<String>,
+    /// Additional dynamic fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}
+
+/// Definition of an MCP resource returned by `resources/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct McpResourceDefinition {
+    /// Unique URI of the resource.
+    pub uri: String,
+    /// Human-readable name of the resource.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub name: Option<String>,
+    /// Description of what the resource contains.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    /// MIME type of the resource content.
+    #[serde(
+        rename = "mimeType",
+        alias = "mime_type",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub mime_type: Option<String>,
+    /// Additional dynamic fields.
+    #[serde(flatten, default)]
+    pub extra: serde_json::Value,
+}
+
+/// Response payload of `resources/list` JSON-RPC method.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct McpListResourcesResult {
+    /// List of available resources.
+    pub resources: Vec<McpResourceDefinition>,
+    /// Optional pagination cursor.
+    #[serde(
+        rename = "nextCursor",
+        alias = "next_cursor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub next_cursor: Option<String>,
+    /// Additional dynamic fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}
+
+/// Content payload item returned by `resources/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct McpResourceContent {
+    /// URI of the read resource.
+    pub uri: String,
+    /// MIME type of the content.
+    #[serde(
+        rename = "mimeType",
+        alias = "mime_type",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub mime_type: Option<String>,
+    /// Text content when the resource is text-based.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub text: Option<String>,
+    /// Base64 encoded blob when the resource is binary.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub blob: Option<String>,
+    /// Additional dynamic fields.
+    #[serde(flatten, default)]
+    pub extra: serde_json::Value,
+}
+
+/// Response payload of `resources/read` JSON-RPC method.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct McpReadResourceResult {
+    /// List of resource contents.
+    pub contents: Vec<McpResourceContent>,
+    /// Additional dynamic fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}

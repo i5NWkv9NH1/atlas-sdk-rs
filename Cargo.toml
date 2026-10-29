@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Official strongly-typed local MCP SDK for Atlas on macOS"
 license = "MIT"
+exclude = ["tests/*"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

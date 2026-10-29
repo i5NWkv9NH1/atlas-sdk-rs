@@ -313,6 +313,22 @@ pub trait AtlasTransport: Send + Sync {
     /// Health check ping to verify server connectivity.
     fn ping(&self) -> impl std::future::Future<Output = Result<bool>> + Send;
 
+    /// Request the list of available tools and their schemas from the MCP server.
+    fn list_tools(
+        &self,
+    ) -> impl std::future::Future<Output = Result<crate::models::McpListToolsResult>> + Send;
+
+    /// Request the list of available resources from the MCP server.
+    fn list_resources(
+        &self,
+    ) -> impl std::future::Future<Output = Result<crate::models::McpListResourcesResult>> + Send;
+
+    /// Read the content of an MCP resource by URI.
+    fn read_resource(
+        &self,
+        uri: &str,
+    ) -> impl std::future::Future<Output = Result<crate::models::McpReadResourceResult>> + Send;
+
     /// Update active library on transport level.
     fn set_active_library(&self, _name_or_path: &str) {}
 }
@@ -530,36 +546,18 @@ impl HttpAtlasTransport {
 
         serde_json::json!({ "content": content })
     }
-}
 
-impl AtlasTransport for HttpAtlasTransport {
-    fn set_active_library(&self, name_or_path: &str) {
-        self.token_resolver.set_active_library(name_or_path, None);
-    }
-
-    async fn ping(&self) -> Result<bool> {
-        let token = self.token_resolver.resolve_token(false).await.ok();
-        match self
-            .execute_raw_rpc("ping", serde_json::json!({}), token.as_deref())
-            .await
-        {
-            Ok(res) => Ok(res.status().is_success()),
-            Err(_) => Ok(false),
-        }
-    }
-
-    async fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<serde_json::Value> {
-        let normalized_args = normalize_params(name, args);
+    /// Execute a JSON-RPC method with automatic background launch and 401 retry handling.
+    pub async fn execute_rpc_method(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let token = self.token_resolver.resolve_token(false).await?;
-
-        let params = serde_json::json!({
-            "name": name,
-            "arguments": normalized_args,
-        });
 
         // * Try sending request with auto-launch if connection fails
         let mut response = match self
-            .execute_raw_rpc("tools/call", params.clone(), Some(&token))
+            .execute_raw_rpc(method, params.clone(), Some(&token))
             .await
         {
             Ok(res) => res,
@@ -568,7 +566,7 @@ impl AtlasTransport for HttpAtlasTransport {
                     return Err(first_err);
                 }
                 self.wake_atlas_app(Some(&token)).await?;
-                self.execute_raw_rpc("tools/call", params.clone(), Some(&token))
+                self.execute_raw_rpc(method, params.clone(), Some(&token))
                     .await?
             }
         };
@@ -578,7 +576,7 @@ impl AtlasTransport for HttpAtlasTransport {
             self.token_resolver.clear_cache();
             let refreshed_token = self.token_resolver.resolve_token(true).await?;
             let retry_res = self
-                .execute_raw_rpc("tools/call", params, Some(&refreshed_token))
+                .execute_raw_rpc(method, params, Some(&refreshed_token))
                 .await?;
 
             if retry_res.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -613,27 +611,77 @@ impl AtlasTransport for HttpAtlasTransport {
             });
         }
 
-        let result = json.get("result");
-        if let Some(res) = result {
-            // ! Check tool-level business error
-            if res.get("isError").and_then(|e| e.as_bool()) == Some(true) {
-                let first_text = res
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|item| item.get("text"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("Unknown Atlas tool error")
-                    .to_string();
-                return Err(AtlasError::ToolError {
-                    tool_name: name.to_string(),
-                    message: first_text,
-                });
-            }
+        Ok(json.get("result").cloned().unwrap_or(serde_json::json!({})))
+    }
+}
 
-            if let Some(content_arr) = res.get("content").and_then(|c| c.as_array()) {
-                return Ok(self.unpack_mcp_content(name, content_arr));
-            }
+impl AtlasTransport for HttpAtlasTransport {
+    fn set_active_library(&self, name_or_path: &str) {
+        self.token_resolver.set_active_library(name_or_path, None);
+    }
+
+    async fn ping(&self) -> Result<bool> {
+        let token = self.token_resolver.resolve_token(false).await.ok();
+        match self
+            .execute_raw_rpc("ping", serde_json::json!({}), token.as_deref())
+            .await
+        {
+            Ok(res) => Ok(res.status().is_success()),
+            Err(_) => Ok(false),
+        }
+    }
+
+    async fn list_tools(&self) -> Result<crate::models::McpListToolsResult> {
+        let val = self
+            .execute_rpc_method("tools/list", serde_json::json!({}))
+            .await?;
+        let res: crate::models::McpListToolsResult = serde_json::from_value(val)?;
+        Ok(res)
+    }
+
+    async fn list_resources(&self) -> Result<crate::models::McpListResourcesResult> {
+        let val = self
+            .execute_rpc_method("resources/list", serde_json::json!({}))
+            .await?;
+        let res: crate::models::McpListResourcesResult = serde_json::from_value(val)?;
+        Ok(res)
+    }
+
+    async fn read_resource(&self, uri: &str) -> Result<crate::models::McpReadResourceResult> {
+        let val = self
+            .execute_rpc_method("resources/read", serde_json::json!({ "uri": uri }))
+            .await?;
+        let res: crate::models::McpReadResourceResult = serde_json::from_value(val)?;
+        Ok(res)
+    }
+
+    async fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<serde_json::Value> {
+        let normalized_args = normalize_params(name, args);
+        let params = serde_json::json!({
+            "name": name,
+            "arguments": normalized_args,
+        });
+
+        let res = self.execute_rpc_method("tools/call", params).await?;
+
+        // ! Check tool-level business error
+        if res.get("isError").and_then(|e| e.as_bool()) == Some(true) {
+            let first_text = res
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("Unknown Atlas tool error")
+                .to_string();
+            return Err(AtlasError::ToolError {
+                tool_name: name.to_string(),
+                message: first_text,
+            });
+        }
+
+        if let Some(content_arr) = res.get("content").and_then(|c| c.as_array()) {
+            return Ok(self.unpack_mcp_content(name, content_arr));
         }
 
         if name == "view_items" {
@@ -649,11 +697,18 @@ impl AtlasTransport for HttpAtlasTransport {
 // ============================================================================
 
 type MockHandlerFn = Box<dyn Fn(serde_json::Value) -> Result<serde_json::Value> + Send + Sync>;
+type MockToolsFn = Box<dyn Fn() -> Result<crate::models::McpListToolsResult> + Send + Sync>;
+type MockResourcesFn = Box<dyn Fn() -> Result<crate::models::McpListResourcesResult> + Send + Sync>;
+type MockReadResourceFn =
+    Box<dyn Fn(&str) -> Result<crate::models::McpReadResourceResult> + Send + Sync>;
 
 /// In-memory mock transport for deterministic, isolated unit testing.
 #[derive(Clone)]
 pub struct MockAtlasTransport {
     handlers: Arc<RwLock<HashMap<String, MockHandlerFn>>>,
+    tools_handler: Arc<RwLock<Option<MockToolsFn>>>,
+    resources_handler: Arc<RwLock<Option<MockResourcesFn>>>,
+    read_resource_handler: Arc<RwLock<Option<MockReadResourceFn>>>,
     call_history: Arc<RwLock<Vec<(String, serde_json::Value)>>>,
 }
 
@@ -668,6 +723,9 @@ impl MockAtlasTransport {
     pub fn new() -> Self {
         Self {
             handlers: Arc::new(RwLock::new(HashMap::new())),
+            tools_handler: Arc::new(RwLock::new(None)),
+            resources_handler: Arc::new(RwLock::new(None)),
+            read_resource_handler: Arc::new(RwLock::new(None)),
             call_history: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -679,6 +737,36 @@ impl MockAtlasTransport {
     {
         if let Ok(mut map) = self.handlers.write() {
             map.insert(tool.to_string(), Box::new(handler));
+        }
+    }
+
+    /// Register a mock response callback for list_tools.
+    pub fn mock_list_tools<F>(&self, handler: F)
+    where
+        F: Fn() -> Result<crate::models::McpListToolsResult> + Send + Sync + 'static,
+    {
+        if let Ok(mut lock) = self.tools_handler.write() {
+            *lock = Some(Box::new(handler));
+        }
+    }
+
+    /// Register a mock response callback for list_resources.
+    pub fn mock_list_resources<F>(&self, handler: F)
+    where
+        F: Fn() -> Result<crate::models::McpListResourcesResult> + Send + Sync + 'static,
+    {
+        if let Ok(mut lock) = self.resources_handler.write() {
+            *lock = Some(Box::new(handler));
+        }
+    }
+
+    /// Register a mock response callback for read_resource.
+    pub fn mock_read_resource<F>(&self, handler: F)
+    where
+        F: Fn(&str) -> Result<crate::models::McpReadResourceResult> + Send + Sync + 'static,
+    {
+        if let Ok(mut lock) = self.read_resource_handler.write() {
+            *lock = Some(Box::new(handler));
         }
     }
 
@@ -701,6 +789,33 @@ impl MockAtlasTransport {
 impl AtlasTransport for MockAtlasTransport {
     async fn ping(&self) -> Result<bool> {
         Ok(true)
+    }
+
+    async fn list_tools(&self) -> Result<crate::models::McpListToolsResult> {
+        if let Ok(lock) = self.tools_handler.read() {
+            if let Some(ref handler) = *lock {
+                return handler();
+            }
+        }
+        Ok(crate::models::McpListToolsResult::default())
+    }
+
+    async fn list_resources(&self) -> Result<crate::models::McpListResourcesResult> {
+        if let Ok(lock) = self.resources_handler.read() {
+            if let Some(ref handler) = *lock {
+                return handler();
+            }
+        }
+        Ok(crate::models::McpListResourcesResult::default())
+    }
+
+    async fn read_resource(&self, uri: &str) -> Result<crate::models::McpReadResourceResult> {
+        if let Ok(lock) = self.read_resource_handler.read() {
+            if let Some(ref handler) = *lock {
+                return handler(uri);
+            }
+        }
+        Ok(crate::models::McpReadResourceResult::default())
     }
 
     async fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<serde_json::Value> {

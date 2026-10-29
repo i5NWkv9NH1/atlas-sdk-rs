@@ -57,7 +57,57 @@ async fn test_live_read_only_queries() {
 }
 
 // ============================================================================
-// 2. Isolated Temporary Ingestion, Mutation, and Teardown Verification
+// 2. Live Schema Parity & Skill Resource
+// ============================================================================
+#[tokio::test]
+async fn test_live_schema_parity_and_skill_resource() {
+    let client = AtlasClient::new();
+
+    let ping_ok = client.ping().await.expect("Failed to execute ping");
+    assert!(
+        ping_ok,
+        "Atlas server must be live and responsive on 127.0.0.1:50473/mcp"
+    );
+
+    // 1. Live tools list
+    let tools_res = client
+        .list_tools()
+        .await
+        .expect("Failed to call list_tools on live Atlas server");
+    assert_eq!(
+        tools_res.tools.len(),
+        78,
+        "Live Atlas server must report all 78 tools"
+    );
+
+    for tool in &tools_res.tools {
+        assert!(!tool.name.is_empty(), "Tool name must not be empty");
+    }
+
+    // 2. Read official skill document resource
+    let skill_res = client
+        .read_resource("atlas://skill")
+        .await
+        .expect("Failed to call read_resource('atlas://skill')");
+    assert!(
+        !skill_res.contents.is_empty(),
+        "atlas://skill must return at least one content item"
+    );
+
+    let skill_doc = &skill_res.contents[0];
+    assert_eq!(skill_doc.uri, "atlas://skill");
+    let text = skill_doc
+        .text
+        .as_deref()
+        .expect("atlas://skill must contain text content");
+    assert!(
+        text.len() > 50,
+        "atlas://skill content must be non-empty documentation"
+    );
+}
+
+// ============================================================================
+// 3. Isolated Temporary Ingestion, Mutation, and Teardown Verification
 // ============================================================================
 #[tokio::test]
 async fn test_live_isolated_ingestion_and_teardown() {

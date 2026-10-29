@@ -68,4 +68,19 @@ impl<T: AtlasTransport> AtlasClient<T> {
     pub async fn ping(&self) -> Result<bool> {
         self.transport.ping().await
     }
+
+    /// List available tools and their schemas from the Atlas MCP server.
+    pub async fn list_tools(&self) -> Result<crate::models::McpListToolsResult> {
+        self.transport.list_tools().await
+    }
+
+    /// List available resources from the Atlas MCP server.
+    pub async fn list_resources(&self) -> Result<crate::models::McpListResourcesResult> {
+        self.transport.list_resources().await
+    }
+
+    /// Read the content of an MCP resource by URI (e.g. `atlas://skill` or `atlas://item/<id>`).
+    pub async fn read_resource(&self, uri: &str) -> Result<crate::models::McpReadResourceResult> {
+        self.transport.read_resource(uri).await
+    }
 }

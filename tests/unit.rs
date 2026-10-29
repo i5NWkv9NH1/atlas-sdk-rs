@@ -160,34 +160,33 @@ const BUILTIN_TOOL_NAMES: &[&str] = &[
 // ============================================================================
 #[tokio::test]
 async fn test_schema_parity() {
-    // * Read schema file from repository root if present; otherwise fallback to builtin 78 tool names
-    let schema_path = Path::new("../atlas-schema.json");
-    let expected_tools: Vec<String> = if schema_path.exists() {
-        let content =
-            std::fs::read_to_string(schema_path).expect("Failed to read atlas-schema.json");
-        let schema_json: Value = serde_json::from_str(&content).expect("Invalid json in schema");
+    // * Read schema file directly from tests/fixtures/atlas-schema.json
+    let fixture_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/atlas-schema.json"
+    );
+    let content =
+        std::fs::read_to_string(fixture_path).expect("tests/fixtures/atlas-schema.json must exist");
+    let schema_json: Value = serde_json::from_str(&content).expect("Invalid json in schema");
 
-        let tools = schema_json
-            .get("result")
-            .and_then(|r| r.get("tools"))
-            .or_else(|| schema_json.get("tools"))
-            .and_then(|t| t.as_array())
-            .expect("Failed to find tools array in schema");
+    let tools = schema_json
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .or_else(|| schema_json.get("tools"))
+        .and_then(|t| t.as_array())
+        .expect("Failed to find tools array in schema");
 
-        // ! 78 tools required
-        assert_eq!(tools.len(), 78, "Schema must contain exactly 78 tools");
+    // ! 78 tools required
+    assert_eq!(tools.len(), 78, "Schema must contain exactly 78 tools");
 
-        tools
-            .iter()
-            .filter_map(|t| {
-                t.get("name")
-                    .and_then(|n| n.as_str())
-                    .map(|s| s.to_string())
-            })
-            .collect()
-    } else {
-        BUILTIN_TOOL_NAMES.iter().map(|s| s.to_string()).collect()
-    };
+    let expected_tools: Vec<String> = tools
+        .iter()
+        .filter_map(|t| {
+            t.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
 
     assert_eq!(
         expected_tools.len(),
@@ -201,6 +200,49 @@ async fn test_schema_parity() {
         let name = tool_name.clone();
         mock.mock(tool_name, move |_| Ok(mock_response_for(&name)));
     }
+
+    // * Check that MCP protocol methods work as expected
+    mock.mock_list_tools(|| {
+        Ok(McpListToolsResult {
+            tools: vec![McpToolDefinition {
+                name: "test_tool".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    });
+    mock.mock_list_resources(|| {
+        Ok(McpListResourcesResult {
+            resources: vec![McpResourceDefinition {
+                uri: "atlas://skill".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    });
+    mock.mock_read_resource(|uri| {
+        Ok(McpReadResourceResult {
+            contents: vec![McpResourceContent {
+                uri: uri.to_string(),
+                text: Some("# Skill Doc".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    });
+
+    let client = AtlasClient::with_transport(mock);
+    let tools_res = client.list_tools().await.unwrap();
+    assert_eq!(tools_res.tools.len(), 1);
+    assert_eq!(tools_res.tools[0].name, "test_tool");
+
+    let resources_res = client.list_resources().await.unwrap();
+    assert_eq!(resources_res.resources.len(), 1);
+    assert_eq!(resources_res.resources[0].uri, "atlas://skill");
+
+    let read_res = client.read_resource("atlas://skill").await.unwrap();
+    assert_eq!(read_res.contents.len(), 1);
+    assert_eq!(read_res.contents[0].text.as_deref(), Some("# Skill Doc"));
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 //! # sora-atlas
 //!
-//! Official strongly-typed local Model Context Protocol (MCP) SDK for the macOS **Atlas** visual library app.
+//! Strongly-typed local Model Context Protocol (MCP) SDK for the macOS **Atlas** visual library app (Unofficial).
 //!
 //! Built for **Rust 2024 Edition** with zero runtime macro overhead.
 

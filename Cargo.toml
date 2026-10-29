@@ -2,7 +2,7 @@
 name = "sora-atlas"
 version = "0.1.0"
 edition = "2024"
-description = "Official strongly-typed local MCP SDK for Atlas on macOS"
+description = "Strongly-typed local MCP SDK for Atlas on macOS (Unofficial)"
 license = "MIT"
 exclude = ["tests/*"]
 

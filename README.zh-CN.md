@@ -4,7 +4,7 @@
 
 > **说明**：本 SDK 主要为个人自用封装。仓库中的绝大部分代码、工程规范与测试套件均由 **Gemini 3.8 Flash** 与 **Gemini 4 Argon** 生成。
 
-macOS 视觉素材管理软件 **Atlas** 的本地 MCP 客户端强类型 Rust SDK（第三方非官方实现）。
+macOS 视觉素材管理软件 [**Atlas**](https://atlasformac.com/) 的本地 MCP 客户端强类型 Rust SDK（第三方非官方实现）。
 
 专为 **Rust 2024 Edition**（Cargo 1.99.0+）打造，基于 `tokio` 与 `reqwest` 实现，零 async-trait 宏引入，零运行时额外开销。
 
@@ -24,12 +24,27 @@ macOS 视觉素材管理软件 **Atlas** 的本地 MCP 客户端强类型 Rust S
 
 ## 安装
 
-在你的 `Cargo.toml` 中添加依赖：
+本包不发布至 Crates.io，支持直接从 GitHub 仓库引入或通过本地文件路径引用：
 
+### 方式一：直接从 GitHub 安装
+```bash
+cargo add --git https://github.com/i5NWkv9NH1/atlas-rs
+```
+或在 `Cargo.toml` 中配置：
 ```toml
 [dependencies]
-sora-atlas = "0.1.0"
-tokio = { version = "1.43", features = ["rt", "macros"] }
+sora-atlas = { git = "https://github.com/i5NWkv9NH1/atlas-rs.git" }
+```
+
+### 方式二：克隆到本地并通过本地路径引用（推荐本机多项目共用）
+```bash
+git clone https://github.com/i5NWkv9NH1/atlas-rs.git
+cargo add --path /path/to/atlas-rs
+```
+或在 `Cargo.toml` 中配置：
+```toml
+[dependencies]
+sora-atlas = { path = "/path/to/atlas-rs" }
 ```
 
 ---
